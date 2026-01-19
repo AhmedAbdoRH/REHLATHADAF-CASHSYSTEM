@@ -5,6 +5,7 @@ import { Project, Expense, FinancialSummary, FinancingRecord, SalesRecord } from
 import ProjectManager from '@/components/ProjectManager';
 import FinancingManager from '@/components/FinancingManager';
 import FinancialDashboard from '@/components/FinancialDashboard';
+import FinancialChart from '@/components/FinancialChart';
 import Header from '@/components/Header';
 
 export default function Home() {
@@ -77,6 +78,7 @@ export default function Home() {
           <ProjectManager onProjectsChange={setProjects} />
         </div>
         <FinancialDashboard summary={summary} />
+        <FinancialChart />
       </div>
     </div>
   );

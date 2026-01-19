@@ -2,10 +2,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot } from "firebase/firestore";
-import { FinancingRecord, SalesRecord } from '@/types';
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { FinancingRecord } from '@/types';
 
-// OC Firebase configuration
+// Cloudinary Configuration
+const CLOUDINARY_UPLOAD_PRESET = "ml_default"; // You might need to create an unsigned preset in Cloudinary settings
+const CLOUDINARY_CLOUD_NAME = "dvikey3wc"; // Updated with your Cloud Name
+const CLOUDINARY_API_KEY = "488219693456662";
+const CLOUDINARY_API_SECRET = "6-tyuooUB67POIoBqDu3EbKNtlo";
+
+// OC Firebase configuration (Firestore remains on hadaf-pa to keep your data)
 const firebaseConfig = {
   apiKey: "AIzaSyDKHlDDZ4GFGI8u6oOhfOulD_XFzL3qZBQ",
   authDomain: "hadaf-pa.firebaseapp.com",
@@ -22,6 +28,8 @@ const app = !getApps().find(a => a.name === OC_APP_NAME)
   : getApp(OC_APP_NAME);
 const db = getFirestore(app);
 
+// Storage is imported from @/lib/firebase which points to rhm-fsystem (Free Storage)
+
 interface FinancingManagerProps {
   onFinancingChange: (financing: FinancingRecord[]) => void;
 }
@@ -32,9 +40,10 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
   const [cost, setCost] = useState('');
   const [isPositive, setIsPositive] = useState(true);
   const [exchangeRate, setExchangeRate] = useState(47.65); // Updated default rate for today
-  const [financingCurrency, setFinancingCurrency] = useState<'SAR' | 'USD' | 'EGP'>('EGP');
+  const [selectedCurrency, setSelectedCurrency] = useState<'USD' | 'SAR' | 'EGP'>('EGP');
+  const [isUploadingId, setIsUploadingId] = useState<string | null>(null);
 
-  const [visibleTransactions, setVisibleTransactions] = useState(10);
+  const [visibleTransactions, setVisibleTransactions] = useState(5);
 
   useEffect(() => {
     fetchExchangeRate();
@@ -45,11 +54,11 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
         id: docSnapshot.id, 
         name: docSnapshot.data().name || '',
         cost: docSnapshot.data().cost || 0,
-        timestamp: docSnapshot.data().timestamp
+        timestamp: docSnapshot.data().timestamp,
+        imageUrl: docSnapshot.data().imageUrl
       }));
       setFinancing(financingList);
       onFinancingChange(financingList);
-      console.log(`Fetched ${financingList.length} transactions from Firestore`);
     }, (error) => {
       console.error('Error listening to transactions:', error);
     });
@@ -58,6 +67,81 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
       unsubscribeTransactions();
     };
   }, []);
+
+  const handleLateImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, recordId: string) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setIsUploadingId(recordId);
+      
+      try {
+        // Upload to Cloudinary using Fetch API
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+        formData.append('cloud_name', CLOUDINARY_CLOUD_NAME);
+
+        const response = await fetch(
+          `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+          {
+            method: 'POST',
+            body: formData,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Cloudinary upload failed');
+        }
+
+        const data = await response.json();
+        const imageUrl = data.secure_url;
+        
+        await updateDoc(doc(db, "transactions", recordId), {
+          imageUrl: imageUrl
+        });
+      } catch (error) {
+        console.error('Error uploading image to Cloudinary:', error);
+        alert('حدث خطأ أثناء رفع الصورة إلى Cloudinary. تأكد من إعداد Unsigned Upload Preset باسم "ml_default" في إعدادات Cloudinary.');
+      } finally {
+        setIsUploadingId(null);
+      }
+    }
+  };
+
+  const removeImage = async (recordId: string) => {
+    if (!window.confirm('هل تريد بالتأكيد إزالة المرفق؟')) return;
+    
+    try {
+      await updateDoc(doc(db, "transactions", recordId), {
+        imageUrl: null
+      });
+    } catch (error) {
+      console.error('Error removing image:', error);
+      alert('حدث خطأ أثناء إزالة المرفق.');
+    }
+  };
+
+  const renderNameWithLinks = (name: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = name.split(urlRegex);
+    
+    return parts.map((part, index) => {
+      if (part.match(urlRegex)) {
+        return (
+          <a 
+            key={index} 
+            href={part} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-400 hover:text-blue-300 underline break-all mx-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part}
+          </a>
+        );
+      }
+      return <span key={index}>{part}</span>;
+    });
+  };
 
   const fetchExchangeRate = async () => {
     try {
@@ -85,13 +169,14 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
     }
 
     try {
-      const costInUSD = convertToUSD(parseFloat(cost), financingCurrency);
+      const costInUSD = convertToUSD(parseFloat(cost), selectedCurrency);
       const finalCost = isPositive ? costInUSD : -costInUSD;
       
       await addDoc(collection(db, "transactions"), { 
         name: name.trim(), 
         cost: finalCost, 
-        timestamp: serverTimestamp() 
+        timestamp: serverTimestamp(),
+        imageUrl: null
       });
       
       setName('');
@@ -131,156 +216,229 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-lg p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-100 text-right">التمويل والنفقات</h2>
+    <div className="glass-card rounded-2xl shadow-2xl p-8 border border-slate-700/50 relative overflow-hidden group">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-3xl -z-10 group-hover:bg-emerald-500/10 transition-colors"></div>
+      
+      <div className="flex justify-between items-start mb-8">
+        <div className="text-right">
+          <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-l from-white to-slate-400">التمويل والنفقات</h2>
+          <p className="text-sm text-slate-400 mt-1 font-medium italic">إدارة التدفقات النقدية والمصاريف</p>
+        </div>
+        <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+        </div>
       </div>
       
-      <div className="bg-gray-700 rounded-lg p-2 border-2 border-blue-500 mb-6">
-        <h3 className="text-lg font-semibold mb-3 text-center text-gray-100">صافي التمويل العام المتاح</h3>
-        <div className="text-2xl font-bold text-blue-400 text-center mb-2">
-          ${getTotalFinancing().toFixed(2)}
-        </div>
-        <div className="flex justify-center space-x-4 space-x-reverse text-xs text-gray-400">
-          <span>{(getTotalFinancing() * 3.75).toFixed(2)} ريال</span>
-          <span>{(getTotalFinancing() * exchangeRate).toFixed(2)} جنيه</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <input
-          type="text"
-          placeholder="اسم العملية"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="md:col-span-2 px-4 py-2 border border-gray-600 bg-gray-700 text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-        />
-        <input
-          type="number"
-          placeholder="المبلغ"
-          value={cost}
-          onChange={(e) => setCost(e.target.value)}
-          className="md:col-span-1 px-4 py-2 border border-gray-600 bg-gray-700 text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-        />
-      </div>
-
-      {/* Separate Currency Bar */}
-      <div className="bg-gray-900 rounded-lg p-1 mb-4">
-        <div className="grid grid-cols-3 gap-1">
-          {(['SAR', 'USD', 'EGP'] as const).map((curr) => (
-            <label key={curr} className={`flex items-center justify-center py-2 px-4 rounded-md cursor-pointer transition-all ${financingCurrency === curr ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
-              <input
-                type="radio"
-                name="fin-currency"
-                checked={financingCurrency === curr}
-                onChange={() => setFinancingCurrency(curr)}
-                className="hidden"
-              />
-              <span className="text-xs font-bold">{curr === 'SAR' ? 'ريال' : curr === 'USD' ? 'دولار' : 'جنيه'}</span>
-            </label>
-          ))}
+      {/* صافي التمويل العام المتاح */}
+      <div className="relative mb-8 group/total">
+        <div className="absolute -inset-1 bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl blur opacity-25 group-hover/total:opacity-50 transition duration-1000 group-hover/total:duration-200"></div>
+        <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-xl p-6 border border-slate-700/50">
+          <h3 className="text-sm font-semibold mb-4 text-center text-slate-400 uppercase tracking-wider">صافي التمويل العام المتاح</h3>
+          <div className="text-4xl font-black text-white text-center mb-4 tracking-tight">
+            ${getTotalFinancing().toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="flex justify-center gap-6 text-sm font-medium">
+            <span className="text-slate-300 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700/50">
+              {(getTotalFinancing() * 3.75).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ريال
+            </span>
+            <span className="text-slate-300 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700/50">
+              {(getTotalFinancing() * exchangeRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} جنيه
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Transaction Type Bar */}
-      <div className="bg-gray-900 rounded-lg p-1 mb-6">
-        <div className="grid grid-cols-2 gap-1">
-          <label className={`flex items-center justify-center py-2 px-4 rounded-md cursor-pointer transition-all ${isPositive ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
+      <div className="space-y-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 relative group/input">
             <input
-              type="radio"
-              name="fin-type"
-              checked={isPositive}
-              onChange={() => setIsPositive(true)}
-              className="hidden"
+              type="text"
+              placeholder="اسم العملية"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-5 py-4 bg-slate-900/40 border border-slate-700/50 text-white rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/40 transition-all placeholder:text-slate-600 font-medium"
             />
-            <span className="text-xs font-bold">إيراد</span>
-          </label>
-          <label className={`flex items-center justify-center py-2 px-4 rounded-md cursor-pointer transition-all ${!isPositive ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
+            <div className="absolute inset-0 rounded-2xl bg-emerald-500/5 opacity-0 group-focus-within/input:opacity-100 pointer-events-none transition-opacity"></div>
+          </div>
+          <div className="md:col-span-1 relative group/input">
             <input
-              type="radio"
-              name="fin-type"
-              checked={!isPositive}
-              onChange={() => setIsPositive(false)}
-              className="hidden"
+              type="number"
+              placeholder="المبلغ"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              className="w-full px-5 py-4 bg-slate-900/40 border border-slate-700/50 text-white rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/40 transition-all placeholder:text-slate-600 font-bold"
             />
-            <span className="text-xs font-bold">مصروف</span>
-          </label>
+            <div className="absolute inset-0 rounded-2xl bg-emerald-500/5 opacity-0 group-focus-within/input:opacity-100 pointer-events-none transition-opacity"></div>
+          </div>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-slate-900/80 p-1 rounded-xl border border-slate-800 flex">
+            {(['SAR', 'USD', 'EGP'] as const).map((curr) => (
+              <button
+                key={curr}
+                onClick={() => setSelectedCurrency(curr)}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                  selectedCurrency === curr ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {curr === 'SAR' ? 'ريال' : curr === 'USD' ? 'دولار' : 'جنيه'}
+              </button>
+            ))}
+          </div>
+          <div className="bg-slate-900/80 p-1 rounded-xl border border-slate-800 flex">
+            <button
+              onClick={() => setIsPositive(true)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                isPositive ? 'bg-green-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-current"></div>
+              <span>إيراد</span>
+            </button>
+            <button
+              onClick={() => setIsPositive(false)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                !isPositive ? 'bg-red-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-current"></div>
+              <span>مصروف</span>
+            </button>
+          </div>
+        </div>
+
+        <button
+          onClick={addFinancialTransaction}
+          className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-6 py-4 rounded-xl font-bold hover:from-emerald-500 hover:to-teal-500 transition-all shadow-xl shadow-emerald-900/20 active:scale-[0.98] hover:scale-[1.01] flex items-center justify-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+          </svg>
+          إضافة عملية مالية
+        </button>
       </div>
 
-      <button
-        onClick={addFinancialTransaction}
-        className="w-full bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors mb-6"
-      >
-        إضافة
-      </button>
-
-      <div className="space-y-6">
-        <div className="bg-gray-700 rounded-lg p-4">
-          <h3 className="text-lg font-semibold mb-3 text-right text-gray-100">سجل العمليات (تمويل ومصروفات)</h3>
+      <div className="relative">
+        <div className="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden">
+          <div className="p-5 border-b border-slate-800 bg-slate-800/30">
+            <h3 className="text-lg font-bold text-slate-200">سجل العمليات المالية</h3>
+          </div>
+          
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm text-right">
               <thead>
-                <tr className="border-b border-gray-600">
-                  <th className="text-right pb-2 text-gray-300 w-[60%]">العملية</th>
-                  <th className="text-right pb-2 text-gray-300 w-[15%]">التاريخ</th>
-                  <th className="text-right pb-2 text-gray-300 w-[20%]">المبلغ</th>
-                  <th className="text-right pb-2 text-gray-300 w-[5%]"></th>
+                <tr className="text-slate-500 border-b border-slate-800/50 uppercase tracking-tighter text-[10px] font-black bg-slate-800/20">
+                  <th className="px-6 py-5 first:rounded-tr-xl">العملية</th>
+                  <th className="px-6 py-5">التاريخ</th>
+                  <th className="px-6 py-5">المبلغ</th>
+                  <th className="px-6 py-5 text-center last:rounded-tl-xl">الإجراءات</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
-                {financing.slice(0, visibleTransactions).map((record) => (
-                  <tr key={record.id} className={`${record.cost > 0 ? 'bg-green-900/20' : 'bg-red-900/20'} transition-colors`}>
-                    <td className="py-3 px-2 text-gray-100 font-medium">
-                      <div className="flex items-center">
-                        <span className={`w-1 h-6 ml-3 rounded-full ${record.cost > 0 ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                        {record.name}
+              <tbody className="divide-y divide-slate-800/30">
+                {financing.slice(0, visibleTransactions).map((record, index) => (
+                  <tr 
+                    key={record.id} 
+                    className={`hover:bg-emerald-500/[0.03] transition-all group/row border-transparent hover:border-emerald-500/20 border-r-2 border-l-2 animate-fade-in opacity-0`}
+                    style={{ animationDelay: `${index * 0.05}s` }}
+                  >
+                    <td className="px-6 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_12px_rgba(0,0,0,0.5)] transition-transform group-hover/row:scale-125 ${
+                          record.cost > 0 ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-red-500 shadow-red-500/50'
+                        }`}></div>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="text-slate-200 font-bold text-base group-hover/row:text-white transition-colors leading-tight">
+                            {renderNameWithLinks(record.name)}
+                          </div>
+                          {record.imageUrl ? (
+                            <div className="flex items-center gap-2">
+                              <a 
+                                href={record.imageUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-bold transition-all"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                عرض المرفق
+                              </a>
+                              <button 
+                                onClick={() => removeImage(record.id)} 
+                                className="p-1 text-slate-600 hover:text-red-400 transition-colors"
+                                title="إزالة المرفق"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                                </svg>
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="flex items-center gap-1.5 text-slate-500 hover:text-emerald-400 text-[10px] cursor-pointer transition-all font-bold group/label">
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleLateImageUpload(e, record.id)} disabled={isUploadingId === record.id} />
+                              {isUploadingId === record.id ? (
+                                <span className="flex items-center gap-1.5">
+                                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                  جاري الرفع...
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5 opacity-60 group-hover/row:opacity-100">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                  </svg>
+                                  إضافة مرفق
+                                </span>
+                              )}
+                            </label>
+                          )}
+                        </div>
                       </div>
                     </td>
-                    <td className="py-3 text-gray-300">
-                      {record.timestamp ? new Date(record.timestamp.seconds * 1000).toLocaleDateString("ar-EG") : '...'}
+                    <td className="px-6 py-5">
+                      <span className="px-3 py-1.5 bg-slate-800/50 rounded-lg text-slate-400 font-bold text-[10px] border border-slate-700/50">
+                        {record.timestamp ? new Date(record.timestamp.seconds * 1000).toLocaleDateString("ar-EG") : '...'}
+                      </span>
                     </td>
-                    <td className={`py-3 font-bold ${record.cost > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      <div>{record.cost > 0 ? '+' : '-'}${Math.abs(record.cost).toFixed(2)}</div>
-                      <div className="text-[10px] text-gray-400 font-normal">
-                        {financingCurrency === 'SAR' ? `${(Math.abs(record.cost) * 3.75).toFixed(2)} ريال` : 
-                         financingCurrency === 'EGP' ? `${(Math.abs(record.cost) * exchangeRate).toFixed(2)} جنيه` : 
+                    <td className="px-6 py-5">
+                      <div className={`font-black text-lg group-hover/row:scale-105 transition-transform ${record.cost > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {record.cost > 0 ? '+' : '-'}${Math.abs(record.cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-bold mt-0.5">
+                        {selectedCurrency === 'SAR' ? `${(Math.abs(record.cost) * 3.75).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ريال` : 
+                         selectedCurrency === 'EGP' ? `${(Math.abs(record.cost) * exchangeRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} جنيه` : 
                          ''}
                       </div>
                     </td>
-                    <td className="py-3 text-left pl-2">
-                      <button
-                        onClick={() => deleteFinancialTransaction(record.id)}
-                        className="text-gray-500 hover:text-red-500 transition-colors"
-                        title="حذف"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                      </button>
+                    <td className="px-6 py-5">
+                      <div className="flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all transform translate-x-2 group-hover/row:translate-x-0">
+                        <button
+                          onClick={() => deleteFinancialTransaction(record.id)}
+                          className="p-2.5 bg-slate-800/50 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-xl transition-all border border-slate-700/50 hover:border-red-500/30"
+                          title="حذف"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-600">
-            <p className="text-sm text-gray-400">
-              إجمالي العمليات: <span className="text-gray-100 font-semibold">{financing.length}</span>
-            </p>
-            <div className="flex flex-col items-end space-y-1">
-              <div className="flex space-x-4 space-x-reverse">
-                <p className="text-sm text-green-400">
-                  التمويل: ${getTotalByType(true).toFixed(2)}
-                </p>
-                <p className="text-sm text-red-400">
-                  المصروفات: ${getTotalByType(false).toFixed(2)}
-                </p>
-              </div>
-              <div className="flex flex-col items-end space-y-0.5 text-[10px] text-gray-500">
-                 <span>{(getTotalByType(true) * 3.75).toFixed(2)} ريال / {(getTotalByType(false) * 3.75).toFixed(2)} ريال</span>
-                 <span>{(getTotalByType(true) * exchangeRate).toFixed(2)} جنيه / {(getTotalByType(false) * exchangeRate).toFixed(2)} جنيه</span>
-               </div>
+
+          <div className="grid grid-cols-2 divide-x divide-x-reverse divide-slate-800 border-t border-slate-800 bg-slate-900/60">
+            <div className="px-4 py-4 text-center">
+              <p className="text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-widest">إجمالي التمويل</p>
+              <p className="text-sm font-black text-emerald-400">${getTotalByType(true).toFixed(2)}</p>
+            </div>
+            <div className="px-4 py-4 text-center">
+              <p className="text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-widest">إجمالي المصروفات</p>
+              <p className="text-sm font-black text-red-400">${getTotalByType(false).toFixed(2)}</p>
             </div>
           </div>
         </div>
@@ -288,9 +446,9 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
         {financing.length > visibleTransactions && (
           <button
             onClick={() => setVisibleTransactions(prev => prev + 10)}
-            className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors mb-4 border border-gray-600"
+            className="w-full py-4 text-slate-500 hover:text-slate-300 font-bold text-xs uppercase tracking-widest bg-slate-900/50 hover:bg-slate-800 transition-all border border-slate-800 rounded-xl mt-4"
           >
-            إظهار المزيد من العمليات ▼
+            عرض المزيد من العمليات
           </button>
         )}
       </div>

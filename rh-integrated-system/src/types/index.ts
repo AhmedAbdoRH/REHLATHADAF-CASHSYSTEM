@@ -4,6 +4,7 @@ export interface Project {
   cost: number;
   projectType: 'egypt' | 'saudi' | 'mah';
   date: string;
+  archived?: boolean;
 }
 
 export interface Expense {
@@ -19,6 +20,7 @@ export interface FinancingRecord {
   name: string;
   cost: number;
   timestamp: any;
+  imageUrl?: string;
 }
 
 export interface SalesRecord {

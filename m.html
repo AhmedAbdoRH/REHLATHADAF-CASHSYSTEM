@@ -45,7 +45,7 @@
           <input type="radio" name="projectType" value="saudi" id="saudi">
           <label for="saudi">المملكة</label>
           <input type="radio" name="projectType" value="mah" id="mah">
-          <label for="mah">MAH/MOH</label>
+          <label for="mah">MAH</label>
         </div>
         <button onclick="addProject()">إضافة المشروع</button>
       </div>
@@ -84,7 +84,7 @@
         </div>
 
         <div class="table-container">
-          <h3>MAH/MOH</h3>
+          <h3>MAH</h3>
           <table>
             <thead>
               <tr>
@@ -198,7 +198,7 @@
         // حساب نتيجة المقاصة
         const clearanceResult =
           (totalSaudi * (2 / 3)) + // نصيب مكتب التسويق من مشاريع المملكة
-          totalMah +               // كامل العائد من مشاريع MAH/MOH
+          totalMah +               // كامل العائد من مشاريع MAH
           -(totalEgypt * (1 / 3)); // طرح نصيب المكتب الرئيسي من مشاريع مصر
   
         document.getElementById('clearanceResult').textContent = `$${clearanceResult.toFixed(2)}`;

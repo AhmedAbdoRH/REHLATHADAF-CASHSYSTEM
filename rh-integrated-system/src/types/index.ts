@@ -21,6 +21,7 @@ export interface FinancingRecord {
   cost: number;
   timestamp: any;
   imageUrl?: string;
+  archived?: boolean;
 }
 
 export interface SalesRecord {

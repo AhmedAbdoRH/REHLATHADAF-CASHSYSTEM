@@ -122,10 +122,9 @@ export default function FinancialDashboard({ summary }: FinancialDashboardProps)
       <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4">
         <div className="container mx-auto max-w-6xl">
           <div className="glass-card bg-slate-900/80 backdrop-blur-2xl rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden">
-            <div className="grid grid-cols-3 divide-x divide-x-reverse divide-slate-800">
+            <div className="grid grid-cols-2 divide-x divide-x-reverse divide-slate-800">
               {[
                 { label: 'إجمالي الدخل', value: totalIncome, color: 'text-emerald-400' },
-                { label: 'صافي الربح', value: netProfit, color: netProfit >= 0 ? 'text-blue-400' : 'text-red-400' },
                 { label: 'إجمالي التمويل', value: totalFinancing, color: 'text-indigo-400' }
               ].map((item, idx) => (
                 <div key={idx} className="px-6 py-4 flex flex-col items-center justify-center group/item hover:bg-slate-800/30 transition-colors">

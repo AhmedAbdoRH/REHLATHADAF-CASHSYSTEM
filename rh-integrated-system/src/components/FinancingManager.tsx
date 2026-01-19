@@ -55,7 +55,8 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
         name: docSnapshot.data().name || '',
         cost: docSnapshot.data().cost || 0,
         timestamp: docSnapshot.data().timestamp,
-        imageUrl: docSnapshot.data().imageUrl
+        imageUrl: docSnapshot.data().imageUrl,
+        archived: docSnapshot.data().archived || false
       }));
       setFinancing(financingList);
       onFinancingChange(financingList);
@@ -197,21 +198,41 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
     }
   };
 
+  const archiveFinancialTransaction = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "transactions", id), { archived: true });
+    } catch (error) {
+      console.error('Error archiving financial transaction:', error);
+      alert('حدث خطأ أثناء أرشفة العملية المالية.');
+    }
+  };
+
+  const unarchiveFinancialTransaction = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "transactions", id), { archived: false });
+    } catch (error) {
+      console.error('Error unarchiving financial transaction:', error);
+      alert('حدث خطأ أثناء استعادة العملية المالية.');
+    }
+  };
+
   const getTotalFinancing = () => {
-    return financing.reduce((sum, record) => sum + record.cost, 0);
+    return financing
+      .filter(record => !record.archived)
+      .reduce((sum, record) => sum + record.cost, 0);
   };
 
   const getPositiveTransactions = () => {
-    return financing.filter(record => record.cost > 0);
+    return financing.filter(record => record.cost > 0 && !record.archived);
   };
 
   const getNegativeTransactions = () => {
-    return financing.filter(record => record.cost < 0);
+    return financing.filter(record => record.cost < 0 && !record.archived);
   };
 
   const getTotalByType = (isPositiveType: boolean) => {
     return financing
-      .filter(record => (record.cost > 0) === isPositiveType)
+      .filter(record => (record.cost > 0) === isPositiveType && !record.archived)
       .reduce((sum, record) => sum + Math.abs(record.cost), 0);
   };
 
@@ -341,17 +362,18 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
                 {financing.slice(0, visibleTransactions).map((record, index) => (
                   <tr 
                     key={record.id} 
-                    className={`hover:bg-emerald-500/[0.03] transition-all group/row border-transparent hover:border-emerald-500/20 border-r-2 border-l-2 animate-fade-in opacity-0`}
+                    className={`hover:bg-emerald-500/[0.03] transition-all group/row border-transparent hover:border-emerald-500/20 border-r-2 border-l-2 animate-fade-in opacity-0 ${record.archived ? 'grayscale opacity-50 bg-slate-900/40' : ''}`}
                     style={{ animationDelay: `${index * 0.05}s` }}
                   >
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-3">
                         <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_12px_rgba(0,0,0,0.5)] transition-transform group-hover/row:scale-125 ${
-                          record.cost > 0 ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-red-500 shadow-red-500/50'
+                          record.archived ? 'bg-slate-500 shadow-slate-500/50' : (record.cost > 0 ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-red-500 shadow-red-500/50')
                         }`}></div>
                         <div className="flex flex-col gap-1.5">
-                          <div className="text-slate-200 font-bold text-base group-hover/row:text-white transition-colors leading-tight">
+                          <div className={`font-bold text-base group-hover/row:text-white transition-colors leading-tight ${record.archived ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
                             {renderNameWithLinks(record.name)}
+                            {record.archived && <span className="mr-2 text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-md no-underline inline-block align-middle">مؤرشف</span>}
                           </div>
                           {record.imageUrl ? (
                             <div className="flex items-center gap-2">
@@ -413,7 +435,28 @@ export default function FinancingManager({ onFinancingChange }: FinancingManager
                       </div>
                     </td>
                     <td className="px-6 py-5">
-                      <div className="flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all transform translate-x-2 group-hover/row:translate-x-0">
+                      <div className="flex items-center justify-center gap-2 opacity-0 group-hover/row:opacity-100 transition-all transform translate-x-2 group-hover/row:translate-x-0">
+                        {record.archived ? (
+                          <button
+                            onClick={() => unarchiveFinancialTransaction(record.id)}
+                            className="p-2.5 bg-slate-800/50 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-400 rounded-xl transition-all border border-slate-700/50 hover:border-emerald-500/30"
+                            title="استعادة من الأرشيف"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => archiveFinancialTransaction(record.id)}
+                            className="p-2.5 bg-slate-800/50 hover:bg-amber-500/20 text-slate-400 hover:text-amber-400 rounded-xl transition-all border border-slate-700/50 hover:border-amber-500/30"
+                            title="أرشفة"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                            </svg>
+                          </button>
+                        )}
                         <button
                           onClick={() => deleteFinancialTransaction(record.id)}
                           className="p-2.5 bg-slate-800/50 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-xl transition-all border border-slate-700/50 hover:border-red-500/30"

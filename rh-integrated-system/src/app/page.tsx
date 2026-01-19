@@ -28,18 +28,22 @@ export default function Home() {
   });
 
   useEffect(() => {
-    // Calculate totals for projects
-    const totalSaudi = projects
+    // Calculate totals for non-archived projects
+    const activeProjects = projects.filter(p => !p.archived);
+    
+    const totalSaudi = activeProjects
       .filter(p => p.projectType === 'saudi')
       .reduce((sum, p) => sum + p.cost, 0);
-    const totalMah = projects
+    const totalMah = activeProjects
       .filter(p => p.projectType === 'mah')
       .reduce((sum, p) => sum + p.cost, 0);
-    const totalEgypt = projects
+    const totalEgypt = activeProjects
       .filter(p => p.projectType === 'egypt')
       .reduce((sum, p) => sum + p.cost, 0);
 
-    const totalFinancing = financing.reduce((sum, record) => sum + record.cost, 0);
+    // Calculate totals for non-archived financing records
+    const activeFinancing = financing.filter(f => !f.archived);
+    const totalFinancing = activeFinancing.reduce((sum, record) => sum + record.cost, 0);
 
     const totalIncome = totalSaudi + totalMah + totalEgypt;
     const totalExpenses = 0; // Expenses removed
